@@ -1,23 +1,19 @@
-const http = require('http');
-const { Server } = require('socket.io');
+const { Server } = require("socket.io");
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("Signaling server is running.");
-});
+// Το Render θα δώσει PORT μέσω process.env.PORT.
+// Το 10000 είναι απλώς default για τοπικό testing.
+const PORT = process.env.PORT || 10000;
 
-const io = new Server(server, {
+const io = new Server({
   cors: {
     origin: "*",
   },
 });
 
-const PORT = process.env.PORT || 3001;
-
 let waitingUsers = [];
 
 function wants(pref, gender) {
-  return pref === 'everyone' || pref === gender;
+  return pref === "everyone" || pref === gender;
 }
 
 function areCompatible(a, b) {
@@ -29,29 +25,33 @@ function removeFromWaiting(socketId) {
   if (idx !== -1) waitingUsers.splice(idx, 1);
 }
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
   socket.emit("status", { connected: true });
 
-  socket.on('disconnect', () => {
+  socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
     removeFromWaiting(socket.id);
 
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
     rooms.forEach((roomId) => {
-      socket.to(roomId).emit('peer-leave');
+      socket.to(roomId).emit("peer-leave");
       socket.leave(roomId);
     });
   });
 
-  socket.on('find-match', ({ userId, youGender, matchPref }) => {
+  socket.on("find-match", ({ userId, youGender, matchPref }) => {
     console.log("Find match:", userId, youGender, matchPref);
 
+    // σιγουρευόμαστε ότι δεν μένει διπλό στην ουρά
     removeFromWaiting(socket.id);
 
-    const partner = waitingUsers.find(u => u.socketId !== socket.id &&
-                                            areCompatible(u, { gender: youGender, matchPref }));
+    const partner = waitingUsers.find(
+      (u) =>
+        u.socketId !== socket.id &&
+        areCompatible(u, { gender: youGender, matchPref })
+    );
 
     if (!partner) {
       waitingUsers.push({ socketId: socket.id, gender: youGender, matchPref });
@@ -81,28 +81,28 @@ io.on('connection', (socket) => {
 
   socket.on("offer", ({ sdp }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach(roomId => socket.to(roomId).emit("offer", { sdp }));
+    rooms.forEach((roomId) => socket.to(roomId).emit("offer", { sdp }));
   });
 
   socket.on("answer", ({ sdp }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach(roomId => socket.to(roomId).emit("answer", { sdp }));
+    rooms.forEach((roomId) => socket.to(roomId).emit("answer", { sdp }));
   });
 
   socket.on("ice", ({ candidate }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach(roomId => socket.to(roomId).emit("ice", { candidate }));
+    rooms.forEach((roomId) => socket.to(roomId).emit("ice", { candidate }));
   });
 
   socket.on("leave", () => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach(roomId => {
+    rooms.forEach((roomId) => {
       socket.to(roomId).emit("peer-leave");
       socket.leave(roomId);
     });
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Signaling server running on port ${PORT}`);
-});
+// ΕΔΩ σηκώνουμε πραγματικά τον server
+io.listen(PORT);
+console.log(`Signaling server running on port ${PORT}`);
