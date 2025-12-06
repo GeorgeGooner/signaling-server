@@ -1,16 +1,20 @@
 const http = require('http');
 const { Server } = require('socket.io');
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("Signaling server is running.");
+});
+
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: "*",
   },
 });
 
 const PORT = process.env.PORT || 3001;
 
-const waitingUsers = [];
+let waitingUsers = [];
 
 function wants(pref, gender) {
   return pref === 'everyone' || pref === gender;
@@ -26,12 +30,12 @@ function removeFromWaiting(socketId) {
 }
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log("Client connected:", socket.id);
 
-  socket.emit('status', { connected: true });
+  socket.emit("status", { connected: true });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.log("Client disconnected:", socket.id);
     removeFromWaiting(socket.id);
 
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
@@ -41,92 +45,64 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('find-match', (payload) => {
-    const { userId, youGender, matchPref, isPremium } = payload;
+  socket.on('find-match', ({ userId, youGender, matchPref }) => {
+    console.log("Find match:", userId, youGender, matchPref);
 
-    socket.data.matchInfo = { userId, gender: youGender, matchPref, isPremium };
+    removeFromWaiting(socket.id);
 
-    let partnerIndex = -1;
+    const partner = waitingUsers.find(u => u.socketId !== socket.id &&
+                                            areCompatible(u, { gender: youGender, matchPref }));
 
-    if (isPremium) {
-      partnerIndex = waitingUsers.findIndex(
-        (u) => u.isPremium && areCompatible(u, socket.data.matchInfo)
-      );
-    }
-
-    if (partnerIndex === -1) {
-      partnerIndex = waitingUsers.findIndex((u) =>
-        areCompatible(u, socket.data.matchInfo),
-      );
-    }
-
-    if (partnerIndex === -1) {
-      waitingUsers.push({
-        socketId: socket.id,
-        userId,
-        gender: youGender,
-        matchPref,
-        isPremium,
-      });
-
-      socket.emit('joined', { roomId: null, peers: 0 });
-
-      setTimeout(() => {
-        const stillWaiting = waitingUsers.find((u) => u.socketId === socket.id);
-        if (stillWaiting) {
-          removeFromWaiting(socket.id);
-          socket.emit('match-error', { message: 'timeout' });
-        }
-      }, 20000);
-
+    if (!partner) {
+      waitingUsers.push({ socketId: socket.id, gender: youGender, matchPref });
+      console.log("User added to queue:", socket.id);
       return;
     }
 
-    const partner = waitingUsers.splice(partnerIndex, 1)[0];
+    removeFromWaiting(partner.socketId);
+
     const partnerSocket = io.sockets.sockets.get(partner.socketId);
-
     if (!partnerSocket) {
-      socket.emit('match-error', { message: 'partner-disconnected' });
+      socket.emit("match-error", { message: "partner-disconnected" });
       return;
     }
 
-    const roomId = `room_${Date.now()}`;
+    const roomId = "room_" + Date.now();
 
     socket.join(roomId);
     partnerSocket.join(roomId);
 
-    socket.emit('joined', { roomId, peers: 1 });
-    partnerSocket.emit('joined', { roomId, peers: 1 });
+    socket.emit("joined", { roomId, peers: 1 });
+    partnerSocket.emit("joined", { roomId, peers: 1 });
 
-    socket.emit('matched', { roomId, polarity: 'caller' });
-    partnerSocket.emit('matched', { roomId, polarity: 'receiver' });
+    socket.emit("matched", { roomId, polarity: "caller" });
+    partnerSocket.emit("matched", { roomId, polarity: "receiver" });
   });
 
-  socket.on('offer', ({ sdp }) => {
+  socket.on("offer", ({ sdp }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach((roomId) => socket.to(roomId).emit('offer', { sdp }));
+    rooms.forEach(roomId => socket.to(roomId).emit("offer", { sdp }));
   });
 
-  socket.on('answer', ({ sdp }) => {
+  socket.on("answer", ({ sdp }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach((roomId) => socket.to(roomId).emit('answer', { sdp }));
+    rooms.forEach(roomId => socket.to(roomId).emit("answer", { sdp }));
   });
 
-  socket.on('ice', ({ candidate }) => {
+  socket.on("ice", ({ candidate }) => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach((roomId) => socket.to(roomId).emit('ice', { candidate }));
+    rooms.forEach(roomId => socket.to(roomId).emit("ice", { candidate }));
   });
 
-  socket.on('leave', () => {
+  socket.on("leave", () => {
     const rooms = [...socket.rooms].filter((r) => r !== socket.id);
-    rooms.forEach((roomId) => {
-      socket.to(roomId).emit('peer-leave');
+    rooms.forEach(roomId => {
+      socket.to(roomId).emit("peer-leave");
       socket.leave(roomId);
     });
   });
 });
 
-server.listen(PORT, () => {
-  console.log('Signaling server running on port', PORT);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Signaling server running on port ${PORT}`);
 });
-
