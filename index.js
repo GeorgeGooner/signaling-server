@@ -129,6 +129,4 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
   console.log('Signaling server running on port', PORT);
 });
-server.listen(PORT, () => {
-  console.log(`Signaling server running on port ${PORT}`);
-});
+
